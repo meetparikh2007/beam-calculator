@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Beam Reaction, SFD & BMD Calculator</title>
+<style>
+:root{font-family:Arial,sans-serif;color:#182230;background:#f4f7fb}body{margin:0;padding:24px}
+main{max-width:1100px;margin:auto}.panel{background:white;border:1px solid #dce3ec;border-radius:12px;padding:18px;margin:14px 0;box-shadow:0 2px 8px #1620330a}
+h1{margin:0 0 8px;font-size:26px}h2{font-size:18px;margin:0 0 12px}.muted{color:#586579;font-size:14px;line-height:1.5}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+label{display:block;font-size:13px;font-weight:700;margin-bottom:5px}input,select{box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px}
+button{border:0;border-radius:8px;padding:10px 14px;background:#175cd3;color:white;font-weight:700;cursor:pointer;margin:5px 5px 5px 0}button.secondary{background:#e8eef7;color:#183153}button.remove{background:#fff0f0;color:#a52222;padding:7px 10px}
+.loadrow{display:grid;grid-template-columns:repeat(3,minmax(100px,1fr)) auto;gap:9px;align-items:end;margin:10px 0;padding:12px;background:#f7f9fc;border-radius:8px}
+.loadrow.point{grid-template-columns:repeat(2,minmax(100px,1fr)) auto}
+.results{display:flex;flex-wrap:wrap;gap:10px}.metric{padding:12px 15px;background:#f1f6ff;border-radius:8px;min-width:170px}.metric b{display:block;font-size:12px;color:#475467;margin-bottom:6px}.metric span{font-size:18px;font-weight:700}
+canvas{display:block;width:100%;height:auto;border:1px solid #e1e7ef;border-radius:8px;background:#fff}
+#error{color:#b42318;font-weight:700}.note{font-size:12px;color:#667085}
+@media(max-width:600px){body{padding:10px}.loadrow,.loadrow.point{grid-template-columns:1fr 1fr}.loadrow button{grid-column:1/-1}}
+</style></head>
+<body><main>
+<div class="panel"><h1>Beam Calculator</h1><div class="muted">Calculate support reactions, the Shear Force Diagram (SFD), and the Bending Moment Diagram (BMD). All positions are measured from the left end of the beam.</div></div>
+<div class="panel"><h2>1. Beam setup</h2><div class="grid">
+<div><label for="type">Beam type</label><select id="type"><option value="ssb">1 — Simply supported (supports at both ends)</option><option value="cant">2 — Cantilever (fixed at left, free at right)</option></select></div>
+<div><label for="L">Total beam length (m)</label><input id="L" type="number" min="0.001" step="any" value="6"></div>
+</div></div>
+<div class="panel"><h2>2. Uniformly distributed loads (UDLs)</h2><div class="muted">Enter load intensity in kN/m and the start/end positions in metres. Downward loads are positive. Leave the section empty if there are no UDLs.</div><div id="udls"></div><button class="secondary" onclick="addUdl()">+ Add UDL</button></div>
+<div class="panel"><h2>3. Point loads</h2><div class="muted">Enter load magnitude in kN and its position from the left end in metres.</div><div id="points"></div><button class="secondary" onclick="addPoint()">+ Add point load</button></div>
+<div class="panel"><button onclick="calculate()">Calculate reactions and diagrams</button><span id="error"></span><div id="results" class="results"></div></div>
+<div class="panel"><h2>Beam schematic, SFD and BMD</h2><div class="muted">The three diagrams share the same horizontal position scale. Shear is in kN and bending moment is in kN·m.</div><canvas id="plot" width="1100" height="760"></canvas><div class="note">Educational calculator for straight beams with vertical point loads and UDLs. Assumes a statically determinate beam, small-deflection beam theory, and ideal supports.</div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+function addUdl(w='',a='',b=''){const d=document.createElement('div');d.className='loadrow';d.innerHTML=`<div><label>Intensity (kN/m)</label><input type="number" min="0" step="any" class="w" value="${w}" placeholder="e.g. 2"></div><div><label>Start x (m)</label><input type="number" min="0" step="any" class="a" value="${a}" placeholder="e.g. 1"></div><div><label>End x (m)</label><input type="number" min="0" step="any" class="b" value="${b}" placeholder="e.g. 4"></div><button class="remove" type="button">Remove</button>`;d.querySelector('button').onclick=()=>d.remove();$('udls').appendChild(d)}
+function addPoint(P='',x=''){const d=document.createElement('div');d.className='loadrow point';d.innerHTML=`<div><label>Magnitude (kN)</label><input type="number" min="0" step="any" class="P" value="${P}" placeholder="e.g. 10"></div><div><label>Position x (m)</label><input type="number" min="0" step="any" class="x" value="${x}" placeholder="e.g. 3"></div><button class="remove" type="button">Remove</button>`;d.querySelector('button').onclick=()=>d.remove();$('points').appendChild(d)}
+function getLoads(){let L=Number($('L').value);if(!(L>0))throw Error('Beam length must be greater than zero.');
+let udls=[...document.querySelectorAll('#udls .loadrow')].map(d=>({w:Number(d.querySelector('.w').value),a:Number(d.querySelector('.a').value),b:Number(d.querySelector('.b').value)})).filter(q=>[q.w,q.a,q.b].every(Number.isFinite));
+let pts=[...document.querySelectorAll('#points .loadrow')].map(d=>({P:Number(d.querySelector('.P').value),x:Number(d.querySelector('.x').value)})).filter(q=>[q.P,q.x].every(Number.isFinite));
+for(const q of udls){if(q.w<0||q.a<0||q.b<=q.a||q.b>L)throw Error('Each UDL must have non-negative intensity and satisfy 0 ≤ start < end ≤ beam length.');}
+for(const q of pts){if(q.P<0||q.x<0||q.x>L)throw Error('Each point load must have non-negative magnitude and position between 0 and beam length.');}
+return {L,udls,pts,type:$('type').value}}
+function solve(d){let {L,udls,pts,type}=d;let total=pts.reduce((s,p)=>s+p.P,0)+udls.reduce((s,u)=>s+u.w*(u.b-u.a),0);
+let moment=pts.reduce((s,p)=>s+p.P*p.x,0)+udls.reduce((s,u)=>s+u.w*(u.b-u.a)*(u.a+u.b)/2,0);
+let RA,RB=0,Mfix=0;
+if(type==='ssb'){RB=moment/L;RA=total-RB}else{RA=total;Mfix=moment}
+const n=Math.max(1000,Math.ceil(L*250)),x=Array.from({length:n+1},(_,i)=>L*i/n),V=[],M=[];
+for(let xx of x){let v=RA,m=(type==='cant'?-Mfix:0)+RA*xx;
+for(let p of pts)if(p.x<=xx+1e-10){v-=p.P;m-=p.P*(xx-p.x)}
+for(let u of udls){let len=Math.max(0,Math.min(xx,u.b)-u.a);if(len>0){v-=u.w*len;m-=u.w*len*(xx-(u.a+Math.min(xx,u.b))/2)}}
+if(type==='ssb'&&xx>=L-1e-10)v+=RB;
+V.push(v);M.push(m)}
+return { ...d,RA,RB,Mfix,x,V,M,total}}
+function fmt(n){return (Math.abs(n)<1e-9?0:n).toFixed(3)}
+function calculate(){try{const r=solve(getLoads());$('error').textContent='';let html=`<div class="metric"><b>Left reaction</b><span>${fmt(r.RA)} kN</span></div>`;
+if(r.type==='ssb')html+=`<div class="metric"><b>Right reaction</b><span>${fmt(r.RB)} kN</span></div>`;else html+=`<div class="metric"><b>Fixed-end moment</b><span>${fmt(r.Mfix)} kN·m</span></div>`;
+html+=`<div class="metric"><b>Maximum shear</b><span>${fmt(Math.max(...r.V))} kN</span></div><div class="metric"><b>Minimum shear</b><span>${fmt(Math.min(...r.V))} kN</span></div><div class="metric"><b>Maximum bending moment</b><span>${fmt(Math.max(...r.M))} kN·m</span></div><div class="metric"><b>Minimum bending moment</b><span>${fmt(Math.min(...r.M))} kN·m</span></div>`;
+$('results').innerHTML=html;draw(r)}catch(e){$('error').textContent=' '+e.message}}
+function draw(r){const c=$('plot'),ctx=c.getContext('2d'),W=c.width,H=c.height;ctx.clearRect(0,0,W,H);ctx.font='14px Arial';ctx.fillStyle='#182230';
+const left=85,right=W-30,plotW=right-left,px=x=>left+plotW*x/r.L;
+const panels=[{top:20,bottom:175,title:'Beam schematic',data:null},{top:220,bottom:445,title:'Shear Force Diagram (kN)',data:r.V},{top:490,bottom:715,title:'Bending Moment Diagram (kN·m)',data:r.M}];
+function line(x1,y1,x2,y2,color='#344054',width=1){ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()}
+panels.forEach(p=>{ctx.fillStyle='#182230';ctx.font='bold 15px Arial';ctx.fillText(p.title,left,p.top+3);line(left,p.bottom,right,p.bottom,'#eef1f5');});
+const yBeam=100;line(left,yBeam,right,yBeam,'#344054',5);
+function support(x,typ){ctx.fillStyle='#667085';ctx.beginPath();if(typ==='fixed'){ctx.fillRect(x-8,yBeam-28,8,56);for(let j=-25;j<30;j+=8)line(x-17,yBeam+j,x-8,yBeam+j+7,'#98a2b3',1)}else{ctx.moveTo(x,yBeam+1);ctx.lineTo(x-13,yBeam+20);ctx.lineTo(x+13,yBeam+20);ctx.closePath();ctx.fill();ctx.beginPath();ctx.arc(x,yBeam+24,3,0,Math.PI*2);ctx.fill()} }
+if(r.type==='ssb'){support(px(0),'pin');support(px(r.L),'pin')}else support(px(0),'fixed');
+r.pts.forEach(p=>{let xx=px(p.x);line(xx,yBeam-38,xx,yBeam-5,'#d92d20',2);ctx.beginPath();ctx.moveTo(xx-5,yBeam-12);ctx.lineTo(xx,yBeam-5);ctx.lineTo(xx+5,yBeam-12);ctx.strokeStyle='#d92d20';ctx.stroke();ctx.fillStyle='#b42318';ctx.font='12px Arial';ctx.fillText(`${p.P} kN`,Math.min(right-45,xx+5),yBeam-42)});
+r.udls.forEach(u=>{let xa=px(u.a),xb=px(u.b);line(xa,yBeam-32,xb,yBeam-32,'#b54708',2);for(let xx=xa;xx<=xb;xx+=Math.max(10,plotW/45)){line(xx,yBeam-29,xx,yBeam-5,'#b54708',1);ctx.beginPath();ctx.moveTo(xx-4,yBeam-11);ctx.lineTo(xx,yBeam-5);ctx.lineTo(xx+4,yBeam-11);ctx.strokeStyle='#b54708';ctx.stroke()}ctx.fillStyle='#93370d';ctx.font='12px Arial';ctx.fillText(`${u.w} kN/m`,Math.min(right-65,(xa+xb)/2),yBeam-38)});
+ctx.fillStyle='#475467';ctx.font='12px Arial';ctx.fillText('0 m',left-10,yBeam+43);ctx.fillText(`${r.L} m`,right-35,yBeam+43);line(left,yBeam+31,right,yBeam+31,'#98a2b3');line(left,yBeam+26,left,yBeam+36,'#98a2b3');line(right,yBeam+26,right,yBeam+36,'#98a2b3');
+for(const p of panels.slice(1)){const arr=p.data,min=Math.min(...arr,0),max=Math.max(...arr,0),range=Math.max(max-min,1e-6),top=p.top+25,bottom=p.bottom-22,y=v=>bottom-(v-min)/range*(bottom-top),y0=y(0);
+line(left,y0,right,y0,'#98a2b3',1);ctx.strokeStyle=p===panels[1]?'#175cd3':'#d92d20';ctx.lineWidth=2;ctx.beginPath();arr.forEach((v,i)=>{let xx=px(r.x[i]);i?ctx.lineTo(xx,y(v)):ctx.moveTo(xx,y(v))});ctx.stroke();
+ctx.fillStyle='#475467';ctx.font='11px Arial';ctx.fillText(fmt(max),8,top+5);ctx.fillText(fmt(min),8,bottom);ctx.fillText('0',left-24,y0+4);
+}
+for(let i=0;i<=6;i++){let xx=left+plotW*i/6,position=r.L*i/6;line(xx,panels[1].top+24,xx,panels[2].bottom,'#e5eaf1',1);ctx.fillStyle='#475467';ctx.font='11px Arial';ctx.fillText(position.toFixed(2),xx-15,740)}
+ctx.fillStyle='#475467';ctx.font='12px Arial';ctx.fillText('Position along beam from left end (m)',W/2-105,758);
+}
+addUdl();addPoint();calculate();
+</script></body></html>
